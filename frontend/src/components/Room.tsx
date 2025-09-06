@@ -6,7 +6,8 @@ import { Progress } from "@/components/ui/progress"
 import { Send, SkipForward, Mic, MicOff, Video, VideoOff, AlertCircle, Upload, X } from "lucide-react"
 import { MovieStreamingService } from "./moviestreaming"
 
-const URL = "http://localhost:3000"
+const URL = import.meta.env.VITE_API_URL;
+
 
 interface Message {
     text: string;
