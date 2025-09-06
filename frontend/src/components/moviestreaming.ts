@@ -32,20 +32,20 @@ export interface ChunkMessage {
 
 export class MovieStreamingService {
     private dataChannel: RTCDataChannel | null = null;
-    
+
     // Sending state
     private currentFile: File | null = null;
     private fileChunks: ArrayBuffer[] = [];
     private sendingProgress = 0;
     private totalChunks = 0;
     private isSending = false;
-    
+
     // Receiving state
     private receivedChunks: Map<number, ArrayBuffer> = new Map();
     private expectedTotalChunks = 0;
     private receivingProgress = 0;
     private movieMetadata: MovieMetadata | null = null;
-    
+
     // Media handling
     private mediaSource: MediaSource | null = null;
     private sourceBuffer: SourceBuffer | null = null;
@@ -53,11 +53,11 @@ export class MovieStreamingService {
     private isBuffering = false;
     private playbackStarted = false;
     private bufferedChunkIndex = 0;
-    
+
     // Sync state
     private isMaster = false;
-    private syncInterval: NodeJS.Timeout | null = null;
-    
+    private syncInterval: ReturnType<typeof setInterval> | null = null;
+
     // Event callbacks
     private onProgressUpdate?: (progress: number, type: 'sending' | 'receiving') => void;
     private onStatusUpdate?: (status: string) => void;
@@ -76,7 +76,7 @@ export class MovieStreamingService {
         this.onStatusUpdate = onStatusUpdate;
         this.onError = onError;
         this.onPlaybackReady = onPlaybackReady;
-        
+
         console.log('🎬 MovieStreamingService initialized');
     }
 
@@ -85,7 +85,7 @@ export class MovieStreamingService {
      */
     setupDataChannel(peerConnection: RTCPeerConnection, isInitiator: boolean = false): RTCDataChannel | null {
         console.log('📡 Setting up data channel, isInitiator:', isInitiator);
-        
+
         if (isInitiator) {
             // Create data channel
             this.dataChannel = peerConnection.createDataChannel('movieSharing', {
@@ -113,7 +113,7 @@ export class MovieStreamingService {
      */
     private setupDataChannelHandlers(channel: RTCDataChannel) {
         console.log('🔧 Setting up data channel handlers');
-        
+
         channel.onopen = () => {
             console.log('✅ Data channel opened, readyState:', channel.readyState);
             this.onStatusUpdate?.('Data channel connected');
@@ -140,7 +140,7 @@ export class MovieStreamingService {
      */
     async shareMovie(file: File): Promise<void> {
         console.log('🎬 Starting movie share:', file.name, file.size, 'bytes');
-        
+
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
             const error = `Data channel not ready. State: ${this.dataChannel?.readyState || 'null'}`;
             console.error('❌', error);
@@ -156,12 +156,12 @@ export class MovieStreamingService {
         this.currentFile = file;
         this.isSending = true;
         this.onStatusUpdate?.('Movie uploading… please wait.');
-        
+
         try {
             // Split file into chunks
             await this.splitFileIntoChunks(file);
             console.log('📁 File split into', this.totalChunks, 'chunks');
-            
+
             // Send metadata first
             const metadata: MovieMetadata = {
                 fileName: file.name,
@@ -177,10 +177,10 @@ export class MovieStreamingService {
 
             this.sendMessage(metadataMessage);
             console.log('📤 Sent metadata');
-            
+
             // Start sending chunks after small delay
             setTimeout(() => this.sendNextChunk(), 100);
-            
+
         } catch (error) {
             console.error('❌ Failed to process movie:', error);
             this.onError?.(`Failed to process movie: ${error}`);
@@ -195,22 +195,22 @@ export class MovieStreamingService {
         this.fileChunks = [];
         this.totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         this.sendingProgress = 0;
-        
+
         console.log('📁 Starting file chunking...');
-        
+
         for (let i = 0; i < this.totalChunks; i++) {
             const start = i * CHUNK_SIZE;
             const end = Math.min(start + CHUNK_SIZE, file.size);
             const chunk = file.slice(start, end);
             const arrayBuffer = await chunk.arrayBuffer();
             this.fileChunks.push(arrayBuffer);
-            
+
             // Log progress every 100 chunks
             if (i % 100 === 0) {
                 console.log(`📁 Chunked ${i}/${this.totalChunks}`);
             }
         }
-        
+
         console.log(`✅ File chunked complete: ${this.totalChunks} chunks`);
     }
 
@@ -235,7 +235,7 @@ export class MovieStreamingService {
 
         const chunkData = this.fileChunks[this.sendingProgress];
         const base64Data = this.arrayBufferToBase64(chunkData);
-        
+
         const chunkMessage: ChunkMessage = {
             type: 'chunk',
             chunkIndex: this.sendingProgress,
@@ -246,20 +246,27 @@ export class MovieStreamingService {
         try {
             this.sendMessage(chunkMessage);
             console.log(`📤 Sent chunk ${this.sendingProgress}/${this.totalChunks} (${chunkData.byteLength} bytes)`);
-            
+
             this.sendingProgress++;
             const progress = (this.sendingProgress / this.totalChunks) * 100;
             this.onProgressUpdate?.(progress, 'sending');
 
             // Continue sending with small delay
             setTimeout(() => this.sendNextChunk(), 10);
-            
+
         } catch (error) {
             console.error(`❌ Failed to send chunk ${this.sendingProgress}:`, error);
             this.onError?.(`Transfer failed at ${this.sendingProgress}/${this.totalChunks}`);
             this.isSending = false;
         }
     }
+
+    handleReceivingDataChannel(channel: RTCDataChannel) {
+        channel.onmessage = (event) => {
+            console.log("Data received:", event.data);
+        };
+    }
+
 
     /**
      * Send message through data channel
@@ -268,7 +275,7 @@ export class MovieStreamingService {
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
             throw new Error('Data channel not ready');
         }
-        
+
         const jsonMessage = JSON.stringify(message);
         this.dataChannel.send(jsonMessage);
     }
@@ -280,7 +287,7 @@ export class MovieStreamingService {
         try {
             const message: ChunkMessage = JSON.parse(data);
             console.log(`📨 Received ${message.type} message`);
-            
+
             switch (message.type) {
                 case 'metadata':
                     this.handleMetadata(message);
@@ -318,7 +325,7 @@ export class MovieStreamingService {
         this.receivingProgress = 0;
         this.playbackStarted = false;
         this.bufferedChunkIndex = 0;
-        
+
         this.onStatusUpdate?.(`Receiving "${message.metadata.fileName}" (${this.formatFileSize(message.metadata.fileSize)})`);
         this.setupMediaSource();
     }
@@ -335,15 +342,15 @@ export class MovieStreamingService {
         const chunkData = this.base64ToArrayBuffer(message.data);
         this.receivedChunks.set(message.chunkIndex, chunkData);
         this.receivingProgress++;
-        
+
         console.log(`📥 Received chunk ${message.chunkIndex}/${this.expectedTotalChunks} (${chunkData.byteLength} bytes)`);
-        
+
         const progress = (this.receivingProgress / this.expectedTotalChunks) * 100;
         this.onProgressUpdate?.(progress, 'receiving');
-        
+
         // Check if we can start playback
         this.checkPlaybackReadiness();
-        
+
         // Try to buffer more chunks
         this.bufferChunks();
     }
@@ -358,7 +365,7 @@ export class MovieStreamingService {
         }
 
         console.log('📺 Setting up MediaSource for', this.movieMetadata.fileType);
-        
+
         // Clean up existing MediaSource
         if (this.mediaSource) {
             this.cleanupMediaSource();
@@ -367,12 +374,12 @@ export class MovieStreamingService {
         this.mediaSource = new MediaSource();
         const objectURL = URL.createObjectURL(this.mediaSource);
         this.videoElement.src = objectURL;
-        
+
         this.mediaSource.addEventListener('sourceopen', () => {
             console.log('📺 MediaSource opened');
-            
+
             if (!this.mediaSource || !this.movieMetadata) return;
-            
+
             try {
                 // Use a more compatible MIME type
                 let mimeType = this.movieMetadata.fileType;
@@ -383,7 +390,7 @@ export class MovieStreamingService {
                         'video/webm; codecs="vp8"',
                         'video/mp4'
                     ];
-                    
+
                     for (const fallback of fallbacks) {
                         if (MediaSource.isTypeSupported(fallback)) {
                             mimeType = fallback;
@@ -392,21 +399,21 @@ export class MovieStreamingService {
                         }
                     }
                 }
-                
+
                 this.sourceBuffer = this.mediaSource.addSourceBuffer(mimeType);
                 this.sourceBuffer.addEventListener('updateend', () => {
                     this.isBuffering = false;
                     console.log('📺 Source buffer update completed');
                     this.bufferChunks(); // Try to buffer more
                 });
-                
+
                 this.sourceBuffer.addEventListener('error', (e) => {
                     console.error('📺 Source buffer error:', e);
                     this.onError?.('Video decoding error');
                 });
-                
+
                 console.log('✅ SourceBuffer created for', mimeType);
-                
+
             } catch (error) {
                 console.error('❌ Failed to create SourceBuffer:', error);
                 this.onError?.(`Unsupported video format: ${this.movieMetadata.fileType}`);
@@ -428,16 +435,16 @@ export class MovieStreamingService {
      */
     private checkPlaybackReadiness() {
         if (this.playbackStarted || !this.expectedTotalChunks) return;
-        
+
         const bufferRatio = this.receivingProgress / this.expectedTotalChunks;
         console.log(`📊 Buffer ratio: ${(bufferRatio * 100).toFixed(1)}%`);
-        
+
         if (bufferRatio >= BUFFER_THRESHOLD) {
             console.log('✅ Starting playback at', (bufferRatio * 100).toFixed(1), '% buffer');
             this.playbackStarted = true;
             this.onStatusUpdate?.('Starting playback...');
             this.onPlaybackReady?.();
-            
+
             if (!this.isMaster) {
                 this.startSyncPlayback();
             }
@@ -455,34 +462,34 @@ export class MovieStreamingService {
         // Find sequential chunks to buffer
         const chunksToAppend: ArrayBuffer[] = [];
         let currentIndex = this.bufferedChunkIndex;
-        
+
         // Collect up to 10 sequential chunks
         while (chunksToAppend.length < 10 && this.receivedChunks.has(currentIndex)) {
             chunksToAppend.push(this.receivedChunks.get(currentIndex)!);
             currentIndex++;
         }
-        
+
         if (chunksToAppend.length === 0) {
             return;
         }
-        
+
         // Combine chunks
         const totalSize = chunksToAppend.reduce((sum, chunk) => sum + chunk.byteLength, 0);
         const combined = new Uint8Array(totalSize);
         let offset = 0;
-        
+
         for (const chunk of chunksToAppend) {
             combined.set(new Uint8Array(chunk), offset);
             offset += chunk.byteLength;
         }
-        
+
         try {
             this.isBuffering = true;
             this.sourceBuffer.appendBuffer(combined);
             this.bufferedChunkIndex = currentIndex;
-            
+
             console.log(`📺 Buffered ${chunksToAppend.length} chunks (${this.formatFileSize(totalSize)}), next index: ${currentIndex}`);
-            
+
         } catch (error) {
             this.isBuffering = false;
             console.error('❌ Buffer append error:', error);
@@ -495,9 +502,9 @@ export class MovieStreamingService {
      */
     private startSyncPlayback() {
         console.log('🎵 Starting sync playback, isMaster:', this.isMaster);
-        
+
         if (!this.videoElement) return;
-        
+
         if (this.isMaster) {
             // Master starts playback and broadcasts sync
             setTimeout(() => {
@@ -519,14 +526,14 @@ export class MovieStreamingService {
      */
     private startSyncBroadcast() {
         if (!this.isMaster || this.syncInterval) return;
-        
+
         console.log('📡 Starting sync broadcast');
-        
+
         this.syncInterval = setInterval(() => {
             if (!this.videoElement || !this.dataChannel || this.dataChannel.readyState !== 'open') {
                 return;
             }
-            
+
             const syncMessage: ChunkMessage = {
                 type: 'sync',
                 syncData: {
@@ -535,7 +542,7 @@ export class MovieStreamingService {
                     timestamp: Date.now()
                 }
             };
-            
+
             try {
                 this.sendMessage(syncMessage);
             } catch (error) {
@@ -549,19 +556,19 @@ export class MovieStreamingService {
      */
     private handleSync(message: ChunkMessage) {
         if (this.isMaster || !message.syncData || !this.videoElement) return;
-        
+
         const { currentTime, paused, timestamp } = message.syncData;
         const now = Date.now();
         const networkDelay = (now - timestamp) / 1000;
         const adjustedTime = currentTime + networkDelay;
-        
+
         const timeDiff = Math.abs(this.videoElement.currentTime - adjustedTime);
-        
+
         if (timeDiff > SEEK_TOLERANCE) {
             console.log(`🔄 Syncing video: ${timeDiff.toFixed(2)}s drift`);
             this.videoElement.currentTime = adjustedTime;
         }
-        
+
         if (paused && !this.videoElement.paused) {
             this.videoElement.pause();
         } else if (!paused && this.videoElement.paused) {
@@ -608,12 +615,12 @@ export class MovieStreamingService {
         const units = ['B', 'KB', 'MB', 'GB'];
         let size = bytes;
         let unitIndex = 0;
-        
+
         while (size >= 1024 && unitIndex < units.length - 1) {
             size /= 1024;
             unitIndex++;
         }
-        
+
         return `${size.toFixed(1)} ${units[unitIndex]}`;
     }
 
@@ -636,22 +643,22 @@ export class MovieStreamingService {
      */
     cleanup() {
         console.log('🧹 Cleaning up MovieStreamingService');
-        
+
         if (this.syncInterval) {
             clearInterval(this.syncInterval);
             this.syncInterval = null;
         }
-        
+
         this.cleanupMediaSource();
         this.mediaSource = null;
-        
+
         this.receivedChunks.clear();
         this.fileChunks = [];
         this.currentFile = null;
         this.isSending = false;
         this.playbackStarted = false;
         this.bufferedChunkIndex = 0;
-        
+
         if (this.dataChannel) {
             this.dataChannel.close();
             this.dataChannel = null;

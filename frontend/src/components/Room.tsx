@@ -63,7 +63,7 @@ export const Room = ({
     const [movieTransferType, setMovieTransferType] = useState<'sending' | 'receiving' | null>(null)
 
     // Typing timeout ref
-    const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto scroll to bottom when new messages arrive
     const scrollToBottom = () => {
@@ -136,7 +136,7 @@ export const Room = ({
 
             // Setup data channel for movie sharing
             if (movieStreamingService) {
-                movieStreamingService.setupSendingDataChannel(pc)
+                movieStreamingService.setupDataChannel(pc)
             }
 
             setSendingPc(pc)
