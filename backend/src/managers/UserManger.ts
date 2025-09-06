@@ -10,7 +10,7 @@ export class UserManager {
     private users: User[];
     private queue: string[];
     private roomManager: RoomManager;
-    
+
     constructor() {
         this.users = [];
         this.queue = [];
@@ -29,9 +29,12 @@ export class UserManager {
 
     removeUser(socketId: string) {
         const user = this.users.find(x => x.socket.id === socketId);
-        
+
+        // Remove from room if in one
+        this.roomManager.removeUserFromRoom(socketId);
+
         this.users = this.users.filter(x => x.socket.id !== socketId);
-        this.queue = this.queue.filter(x => x === socketId);
+        this.queue = this.queue.filter(x => x !== socketId);
     }
 
     clearQueue() {
@@ -50,13 +53,14 @@ export class UserManager {
         if (!user1 || !user2) {
             return;
         }
-        console.log("creating roonm");
+        console.log("creating room");
 
         const room = this.roomManager.createRoom(user1, user2);
         this.clearQueue();
     }
 
     initHandlers(socket: Socket) {
+        // WebRTC signaling
         socket.on("offer", ({sdp, roomId}: {sdp: string, roomId: string}) => {
             this.roomManager.onOffer(roomId, sdp, socket.id);
         })
@@ -68,6 +72,51 @@ export class UserManager {
         socket.on("add-ice-candidate", ({candidate, roomId, type}) => {
             this.roomManager.onIceCandidates(roomId, socket.id, candidate, type);
         });
-    }
 
+        // Chat functionality
+        socket.on("send-message", ({message, roomId}: {message: string, roomId: string}) => {
+            const user = this.users.find(u => u.socket.id === socket.id);
+            if (user) {
+                this.roomManager.onMessage(roomId, socket.id, message, user.name);
+            }
+        });
+
+        socket.on("typing", ({isTyping, roomId}: {isTyping: boolean, roomId: string}) => {
+            this.roomManager.onTyping(roomId, socket.id, isTyping);
+        });
+
+        // Movie sharing
+        socket.on("movie-share", ({roomId, fileName, fileSize, fileType}: {
+            roomId: string, 
+            fileName: string, 
+            fileSize: number, 
+            fileType: string
+        }) => {
+            this.roomManager.onMovieShare(roomId, socket.id, {fileName, fileSize, fileType});
+        });
+
+        socket.on("movie-share-response", ({roomId, accepted}: {roomId: string, accepted: boolean}) => {
+            this.roomManager.onMovieShareResponse(roomId, socket.id, accepted);
+        });
+
+        // New chat request
+        socket.on("new-chat", () => {
+            // Remove from current room
+            this.roomManager.removeUserFromRoom(socket.id);
+            
+            // Add back to queue
+            if (!this.queue.includes(socket.id)) {
+                this.queue.push(socket.id);
+                socket.emit("lobby");
+                this.clearQueue();
+            }
+        });
+
+        socket.on("join", ({name}: {name: string}) => {
+            const user = this.users.find(u => u.socket.id === socket.id);
+            if (user) {
+                user.name = name || "Anonymous";
+            }
+        });
+    }
 }
