@@ -33,7 +33,9 @@ export const Landing = () => {
             
             if (videoRef.current) {
                 videoRef.current.srcObject = new MediaStream([videoTrack])
-                videoRef.current.play()
+                videoRef.current.play().catch(error => {
+                    console.error("Error playing video:", error)
+                })
             }
             
             console.log("Camera and microphone access granted")
@@ -49,11 +51,20 @@ export const Landing = () => {
         }
     }
 
+    // Fix: Remove dependency array to run immediately, then check for videoRef
     useEffect(() => {
-        if (videoRef.current) {
-            getCam()
-        }
+        getCam()
     }, [])
+
+    // Update video element when track changes
+    useEffect(() => {
+        if (videoRef.current && localVideoTrack) {
+            videoRef.current.srcObject = new MediaStream([localVideoTrack])
+            videoRef.current.play().catch(error => {
+                console.error("Error playing video:", error)
+            })
+        }
+    }, [localVideoTrack])
 
     const handleStartChat = () => {
         if (!localVideoTrack || !localAudioTrack) {
